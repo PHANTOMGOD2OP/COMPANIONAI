@@ -36,7 +36,7 @@ export const Sidebar = ({
       icon: Plus,
       href: '/companion/new',
       label: "Create",
-      pro: true,
+      pro: false,
     },
     {
       icon: Settings,
