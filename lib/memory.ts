@@ -1,7 +1,9 @@
 import { Redis } from "@upstash/redis";
 import { OpenAIEmbeddings } from "langchain/embeddings/openai";
-import { PineconeClient } from "@pinecone-database/pinecone";
+import { Pinecone } from "@pinecone-database/pinecone";
 import { PineconeStore } from "langchain/vectorstores/pinecone";
+import { Document } from "langchain/document";
+
 
 export type CompanionKey = {
   companionName: string;
@@ -12,19 +14,21 @@ export type CompanionKey = {
 export class MemoryManager {
   private static instance: MemoryManager;
   private history: Redis;
-  private vectorDBClient: PineconeClient;
+  private vectorDBClient: Pinecone;
 
   public constructor() {
     this.history = Redis.fromEnv();
-    this.vectorDBClient = new PineconeClient();
+    this.vectorDBClient = new Pinecone(
+        {
+            apiKey: process.env.PINECONE_API_KEY!,
+            environment: process.env.PINECONE_ENVIRONMENT!,
+        }
+    );
   }
 
   public async init() {
-    if (this.vectorDBClient instanceof PineconeClient) {
-      await this.vectorDBClient.init({
-        apiKey: process.env.PINECONE_API_KEY!,
-        environment: process.env.PINECONE_ENVIRONMENT!,
-      });
+    if (this.vectorDBClient instanceof Pinecone) {
+      this.vectorDBClient.listIndexes();
     }
   }
 
@@ -32,23 +36,54 @@ export class MemoryManager {
     recentChatHistory: string,
     companionFileName: string
   ) {
-    const pineconeClient = <PineconeClient>this.vectorDBClient;
+    const pineconeClient = <Pinecone>this.vectorDBClient;
 
+      const pineconeIndex = pineconeClient.Index(
+        process.env.PINECONE_INDEX! || ""
+      );
+
+      const vectorStore = await PineconeStore.fromExistingIndex(
+        new OpenAIEmbeddings({ openAIApiKey: process.env.OPENAI_API_KEY }),
+        {pineconeIndex}
+      );
+
+      const similarDocs = await vectorStore 
+        .similaritySearch(recentChatHistory, 3, { fileName: companionFileName })
+        .catch((err) => {
+          console.log("WARNING: failed to get vector search results.", err);
+        });
+      return similarDocs;
+  }
+
+  public async UpsertChatHistory(
+    ChatHistory: string,
+    companionFileName: string
+  ){
+    const pineconeClient = <Pinecone>this.vectorDBClient;
     const pineconeIndex = pineconeClient.Index(
       process.env.PINECONE_INDEX! || ""
     );
 
-    const vectorStore = await PineconeStore.fromExistingIndex(
-      new OpenAIEmbeddings({ openAIApiKey: process.env.OPENAI_API_KEY }),
-      { pineconeIndex }
-    ); 
+    const docs = [
+      new Document({
+        metadata: { 
+          fileName: companionFileName,
+        },
+        pageContent: ChatHistory,
+      }),
+    ];
+    
+    try {
+      await PineconeStore.fromDocuments( docs,
+        new OpenAIEmbeddings({ openAIApiKey: process.env.OPENAI_API_KEY }),
+        {pineconeIndex}
+      );    
 
-    const similarDocs = await vectorStore
-      .similaritySearch(recentChatHistory, 3, { fileName: companionFileName })
-      .catch((err) => {
-        console.log("WARNING: failed to get vector search results.", err);
-      });
-    return similarDocs;
+      console.log("INFO: successfully upserted chat history.");
+      
+    } catch (error) {
+      console.log("WARNING: failed to upsert chat history.", error);
+    }
   }
 
   public static async getInstance(): Promise<MemoryManager> {
@@ -112,5 +147,4 @@ export class MemoryManager {
       counter += 1;
     }
   }
-}
-
+                  }
