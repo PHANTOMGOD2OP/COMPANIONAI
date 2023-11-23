@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "postinstall": "node scripts/seed.ts && npx prisma generate && npx prisma db push"
+    "postinstall": "npx prisma generate && npx prisma db push && node scripts/seed.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^4.23.0",
